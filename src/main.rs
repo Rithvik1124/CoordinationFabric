@@ -1,6 +1,10 @@
 use std::fs;
 use std::{thread, time};
 
+use reqwest::blocking::Client;
+use serde::Serialize;
+
+
 
 
 pub struct CPUMetrics{
@@ -15,18 +19,25 @@ pub struct CPUMetrics{
 
 }
 
+#[derive(Serialize)]
+struct CpuPayload {
+    cpu_usage: f64,
+}
 
 fn main() {
     println!("Started!");
    
+    let client = Client::new();
 
+    let server_url = "http://127.0.0.1:8080/cpu";
     
     loop{
 
         //Delta 1
         let before_30_read = match fs::read("/proc/stat"){
-        Ok(v)=>v,
-            Err(_) => return , };
+            Ok(v)=>v,
+            Err(_) => return , 
+        };
         let y = String::from_utf8_lossy(&before_30_read).into_owned();
         let cpu_values_1:Vec<&str> = y.split_whitespace().collect();
 
@@ -46,7 +57,8 @@ fn main() {
         
         let after_30_read = match fs::read("/proc/stat"){
             Ok(v)=>v,
-            Err(_) => return , };
+            Err(_) => return , 
+        };
         let y = String::from_utf8_lossy(&after_30_read).into_owned();
         let cpu_values_2:Vec<&str> = y.split_whitespace().collect();
         let mut cpu2 = CPUMetrics{
@@ -73,6 +85,14 @@ fn main() {
         println!("total_jiffies:{} busy_jiffies:{} curr_compute: {}",total_jiffies, busy_jiffies,curr_compute);      
 
 
+        let payload = CpuPayload {
+            cpu_usage: curr_compute,
+        };
+
+        match client.post(server_url).json(&payload).send() {
+            Ok(resp) => println!("Sent ({})", resp.status()),
+            Err(e) => println!("Failed to send: {}", e),
+        }
 
 
 
