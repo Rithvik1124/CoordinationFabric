@@ -9,6 +9,7 @@ use std::net::SocketAddr;
 #[derive(Debug, Deserialize)]
 struct CpuPayload {
     cpu_usage: f64,
+    mem_usage: f64
 }
 
 async fn cpu_handler(
@@ -16,9 +17,10 @@ async fn cpu_handler(
     Json(payload): Json<CpuPayload>,
 ) {
     println!(
-        "[{}] CPU Usage: {:.2}%",
+        "[{}] CPU Usage: {:.2}%, Mem Usage: {:.2}%",
         addr.ip(),
-        payload.cpu_usage
+        payload.cpu_usage,
+        payload.mem_usage
     );
 }
 

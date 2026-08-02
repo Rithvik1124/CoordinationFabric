@@ -22,26 +22,28 @@ pub struct CPUMetrics{
 #[derive(Serialize)]
 struct CpuPayload {
     cpu_usage: f64,
+    mem_usage: f64,
 }
 
-fn main() {
-    println!("Started!");
-   
-    let client = Client::new();
+// ["MemTotal:", "12005580", "kB", "MemFree:", "1004288", "kB", "MemAvailable:", "6852260", "kB"]
+fn get_memused()-> f64{
+    let before_30_read =  fs::read("/proc/meminfo").unwrap();
+    let y = String::from_utf8_lossy(&before_30_read).into_owned();
+    let mem_values:Vec<&str> = y.split_whitespace().collect();
+    let mem_available = mem_values[7].parse::<f64>().unwrap();
+    let mem_total = mem_values[1].parse::<f64>().unwrap();
+    let mem_used:f64 = (1.0 -(mem_available/mem_total))*100.0;
 
-    let server_url = "http://127.0.0.1:8080/cpu";
-    
-    loop{
+    mem_used
+}
 
-        //Delta 1
-        let before_30_read = match fs::read("/proc/stat"){
-            Ok(v)=>v,
-            Err(_) => return , 
-        };
+fn get_cpuusage()-> f64{
+    //Delta 1
+        let before_30_read =  fs::read("/proc/stat").unwrap();
         let y = String::from_utf8_lossy(&before_30_read).into_owned();
         let cpu_values_1:Vec<&str> = y.split_whitespace().collect();
 
-        let mut cpu1 = CPUMetrics{
+        let cpu1 = CPUMetrics{
             user:cpu_values_1[1].parse().unwrap(),
             nice:cpu_values_1[2].parse().unwrap(),
             system:cpu_values_1[3].parse().unwrap(),
@@ -55,13 +57,10 @@ fn main() {
         let ten_millis = time::Duration::from_millis(30000);
         thread::sleep(ten_millis);
         
-        let after_30_read = match fs::read("/proc/stat"){
-            Ok(v)=>v,
-            Err(_) => return , 
-        };
+        let after_30_read =  fs::read("/proc/stat").unwrap();
         let y = String::from_utf8_lossy(&after_30_read).into_owned();
         let cpu_values_2:Vec<&str> = y.split_whitespace().collect();
-        let mut cpu2 = CPUMetrics{
+        let cpu2 = CPUMetrics{
             user:cpu_values_2[1].parse().unwrap(),
             nice:cpu_values_2[2].parse().unwrap(),
             system:cpu_values_2[3].parse().unwrap(),
@@ -82,11 +81,23 @@ fn main() {
                          (cpu2.steal-cpu1.steal)        ;
         let busy_jiffies = total_jiffies-(cpu2.idle-cpu1.idle);
         let curr_compute: f64 = (busy_jiffies as f64/total_jiffies as f64)*100.0;
-        println!("total_jiffies:{} busy_jiffies:{} curr_compute: {}",total_jiffies, busy_jiffies,curr_compute);      
+        //println!("total_jiffies:{} busy_jiffies:{} curr_compute: {}",total_jiffies, busy_jiffies,curr_compute);      
+        curr_compute
+    
+}
 
+fn main() {
+    println!("Started!");
+    
+   
+    let client = Client::new();
 
+    let server_url = "http://127.0.0.1:8080/cpu";
+    
+    loop{
         let payload = CpuPayload {
-            cpu_usage: curr_compute,
+            cpu_usage: get_cpuusage(),
+            mem_usage: get_memused()
         };
 
         match client.post(server_url).json(&payload).send() {
@@ -102,3 +113,14 @@ fn main() {
 
     
 }
+
+
+/*
+score = (0.4 * cpu * cpu) + (0.4 * mem * mem) + (0.1 * disk * disk) + (0.1 * net * net)
+where:
+cpu  = cpu_usage / 100.0
+mem  = 1.0 - (MemAvailable / MemTotal)
+disk = disk_util / 100.0
+net  = max(rx_util, tx_util) / 100.0
+}
+*/
