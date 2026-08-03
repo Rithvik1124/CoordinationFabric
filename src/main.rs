@@ -21,6 +21,7 @@ pub struct CPUMetrics{
 
 #[derive(Serialize)]
 struct CpuPayload {
+    avg_score:f64,
     cpu_usage: f64,
     mem_usage: f64,
 }
@@ -36,6 +37,10 @@ fn get_memused()-> f64{
 
     mem_used
 }
+
+// fn get_netio()-> f64{
+    
+// }
 
 fn get_cpuusage()-> f64{
     //Delta 1
@@ -95,9 +100,13 @@ fn main() {
     let server_url = "http://127.0.0.1:8080/cpu";
     
     loop{
+        let cpu=get_cpuusage();
+        let mem = get_memused();
+        let avg_score = (cpu+mem)/2.0;
         let payload = CpuPayload {
-            cpu_usage: get_cpuusage(),
-            mem_usage: get_memused()
+            avg_score: avg_score,
+            cpu_usage: cpu,
+            mem_usage: mem
         };
 
         match client.post(server_url).json(&payload).send() {
