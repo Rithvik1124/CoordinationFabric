@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use slotmap::{DefaultKey, SlotMap};
 use std::{
     collections::{HashMap, HashSet}, hash::Hash, net::{IpAddr,Ipv4Addr}, sync::{LazyLock, Mutex, RwLock},
 };
@@ -7,38 +8,9 @@ use rand::{Rng, rng, RngExt};
 ////////////////////////////////////////////////////STRUCTURES//////////////////////////////////////////////////////////////
 
 //New Node
-#[derive(Debug, Deserialize, Clone, PartialEq)]
-struct Node{
-    ip_addr: IpAddr,
-    score: f64,
-}
-
-#[derive(Debug, Clone)]
-pub struct NodeCompute {
-    pub score: f64,
-    pub state: State,
-}
-
-//Employed Node
-#[derive(Debug, Deserialize)]
-pub struct EmployedNode{
-    roles: Vec<Role>,
-    host_ip_addr: IpAddr,
-    score: f64,
-}
 
 
-#[derive(Default, Debug)]
-struct RoleComputeAverage {
-    sigma_total: f64,
-    sigma_count: usize,
 
-    ioc_total: f64,
-    ioc_count: usize,
-
-    consensus_total: f64,
-    consensus_count: usize,
-}
 
 
 
@@ -114,27 +86,154 @@ impl RoleMap {
 
 }
 
-const THRESHOLD: f64 = 60.0;
-static ROLE_COMPUTE: LazyLock<Mutex<RoleComputeAverage>> =
-    LazyLock::new(|| Mutex::new(RoleComputeAverage::default()));
+
+type NodeId = DefaultKey;
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+struct Node {
+    ip: IpAddr,
+    score: f64,
+    state: State,
+    roles: Vec<Role>,
+}
+
+impl Node{
+
+}
+
+struct Scheduler {
+    nodes: SlotMap<NodeId, Node>,
+    by_ip: HashMap<IpAddr, NodeId>,
+    by_role: HashMap<Role, HashSet<NodeId>>,
+    sorted_by_score: Vec<NodeId>,
+}
+
+impl Scheduler {
+    // add node to nodes
+    fn add_node(&mut self, node: Node)-> NodeId {
+        let ip_addr = node.ip;
+        let node_id = self.nodes.insert(node);
+        self.by_ip.insert(ip_addr, node_id);
+        // add/update by_role
+        node_id
+        
+
+    }  
 
 
-static ROLE_MAP: LazyLock<Mutex<RoleMap>> =
-    LazyLock::new(|| Mutex::new(RoleMap::default()));
+    fn get_role_computes(&self) -> HashMap<Role,f64> {
+        let mut map: HashMap<Role,f64> = HashMap::new();
+        let mut ioc_tot: f64 = 0.0; 
+        let mut ioc_count = 0;
 
-// Hashmap of nodes and their compute scores, for easy updation every 2-3 minutes
-static NODES_COMPUTE_MAP: LazyLock<RwLock<HashMap<IpAddr, NodeCompute>>> =
-    LazyLock::new(|| RwLock::new(HashMap::new()));
+        let mut consensus_tot: f64 = 0.0;
+        let mut consensus_count = 0;
 
-// Vector of nodes sorted in ascending order based on their compute scores, for easy lookup when allocating roles
-static SORTED_NODES_COMPUTE_MAP: LazyLock<RwLock<Vec<(IpAddr, NodeCompute)>>> =
-    LazyLock::new(|| RwLock::new(Vec::new()));
+        let mut sigma_tot: f64 = 0.0;
+        let mut sigma_count = 0;
+        for i in self.by_role[&Sigma].clone(){
+            sigma_tot+= self.nodes.get(i).unwrap().score;
+            sigma_count+=1;
 
-static UNEMPLOYED_NODES_SORTED_MAP: LazyLock<RwLock<HashSet<IpAddr>>> =
-    LazyLock::new(|| RwLock::new(HashSet::new()));
+        }
+        for i in self.by_role[&IOC].clone(){
+            ioc_tot+= self.nodes.get(i).unwrap().score;
+            ioc_count+=1;
+
+        }
+        for i in self.by_role[&Consensus].clone(){
+            consensus_tot+= self.nodes.get(i).unwrap().score;
+            consensus_count+=1;
+
+        }
+        map.insert(Sigma, sigma_tot/sigma_count as f64);
+        map.insert(IOC, ioc_tot/ioc_count as f64);
+        map.insert(Consensus, consensus_tot/consensus_count as f64);
+
+
+
+        map
+        
+    }
+
+    // sort sorted_by_scores
+    fn rebuild_sorted_nodes(&mut self) {
+        let mut ids: Vec<NodeId> = self.nodes.keys().collect();
+
+        ids.sort_by(|a, b| {
+            let score_a = self.nodes[*a].score;
+            let score_b = self.nodes[*b].score;
+
+            score_a.total_cmp(&score_b)
+        });
+
+        self.sorted_by_score = ids;
+    }
+    // 
+    fn change_role(&mut self, node_id: NodeId, roles: &Vec<Role>) {
+        // get old roles first
+        let old_roles = match self.nodes.get(node_id) {
+            Some(node) => node.roles.clone(),
+            None => return,
+        };
+
+        // removing node from old role indexes
+        for role in old_roles {
+            if let Some(nodes) = self.by_role.get_mut(&role) {
+                nodes.remove(&node_id);
+            }
+        }
+
+        // update the actual Node
+        if let Some(node) = self.nodes.get_mut(node_id) {
+            node.roles = roles.clone();
+        }
+
+        // add node to new role indexes
+        for role in roles {
+            self.by_role
+                .entry(role.clone())
+                .or_default()
+                .insert(node_id);
+        }
+    }
+    
+    fn remove_from_by_role(&mut self, node_id: NodeId){
+        for i in &self.by_role[&Sigma]{
+            if *i== node_id{
+                self.by_role[&Sigma].clone();
+
+            }
+
+        }
+            
+
+    }
+
+    fn remove_node(&mut self, nodeId: NodeId){
+        let ip_addr = self.nodes.get(nodeId).unwrap().ip;
+        self.nodes.remove(nodeId);
+        self.by_ip.remove(&ip_addr);
+
+        self.remove_from_by_role(nodeId);
+
+    }
+    fn update_sorted_nodes(){
+
+    }
+    fn update_node_map(){
+
+    }
+
+}
+
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+fn make_nodes(){
+
+}
 
 
 
@@ -219,10 +318,8 @@ fn check_overload(){
             let overloaded_ip = sorted_nodes_map[i].0;
             share_load(overloaded_ip, roles);
         }
-        else if sorted_nodes_map[i].1.score>= THRESHOLD && get_node_state(sorted_nodes_map[i].0)==State::Active{
-            let roles = get_node_roles(sorted_nodes_map[i].0);
-            let overloaded_ip = sorted_nodes_map[i].0;
-            share_load( overloaded_ip, roles );
+        else if sorted_nodes_map[i].1.score<= THRESHOLD{
+            return 
         }
     }
 
@@ -232,7 +329,10 @@ fn check_overload(){
 
 //FIND OUT A NODE THAT IS IDLE WITH LOW COMPUT - IF NOT THEN AN ACTIVE NODE WITH THE LOWEST COMPUT AND SHARE IT WITH THE OVERLOADED NODE
 fn share_load(overloaded_ip:IpAddr, roles: Vec<Role>){
-
+    //get unemployed nodes
+    //check if unemployed nodes exist
+    //if not then use the active nodes within our network with the lowest computes - from sorted_nodes_compute
+    //make a remove_roles function, and add the role(s) to the unemployed or low compute guy else
 
 }
 

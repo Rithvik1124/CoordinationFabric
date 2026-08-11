@@ -13,8 +13,6 @@ use std::net::SocketAddr;
 // #[derive(Debug, Deserialize)]
 // struct CPUPayload {
 //     avg_score: f64,
-//     cpu_usage: f64,
-//     mem_usage: f64
 // }
 
 // println!(

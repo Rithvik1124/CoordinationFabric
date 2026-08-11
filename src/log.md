@@ -557,3 +557,6 @@ The scheduler remains exactly the same because it only asks:
 > "Who currently owns the Sigma role?"
 
 It never needs to know *why* that node owns it. This separation of concerns makes the system easier to extend as the cluster grows or the assignment policy becomes more sophisticated.
+
+
+Yes I use chatgpt, I need to visualize stuff before I can even write a line.

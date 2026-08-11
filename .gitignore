@@ -1,4 +1,5 @@
 /target
+log.md
 flake.lock
 .vscode
 server/target
