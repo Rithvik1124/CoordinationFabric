@@ -8,10 +8,7 @@ use rand::{Rng, rng, RngExt};
 ////////////////////////////////////////////////////STRUCTURES//////////////////////////////////////////////////////////////
 
 //New Node
-
-
-
-
+const THRESHOLD: f64 = 60.0;
 
 
 #[derive(Eq, Hash, PartialEq, Clone, Debug, Deserialize)]
@@ -114,46 +111,17 @@ impl Scheduler {
         let ip_addr = node.ip;
         let node_id = self.nodes.insert(node);
         self.by_ip.insert(ip_addr, node_id);
-        // add/update by_role
+        self.decide_need(node_id);
+        self.rebuild_sorted_nodes();
         node_id
-        
-
     }  
 
-
-    fn get_role_computes(&self) -> HashMap<Role,f64> {
-        let mut map: HashMap<Role,f64> = HashMap::new();
-        let mut ioc_tot: f64 = 0.0; 
-        let mut ioc_count = 0;
-
-        let mut consensus_tot: f64 = 0.0;
-        let mut consensus_count = 0;
-
-        let mut sigma_tot: f64 = 0.0;
-        let mut sigma_count = 0;
-        for i in self.by_role[&Sigma].clone(){
-            sigma_tot+= self.nodes.get(i).unwrap().score;
-            sigma_count+=1;
-
-        }
-        for i in self.by_role[&IOC].clone(){
-            ioc_tot+= self.nodes.get(i).unwrap().score;
-            ioc_count+=1;
-
-        }
-        for i in self.by_role[&Consensus].clone(){
-            consensus_tot+= self.nodes.get(i).unwrap().score;
-            consensus_count+=1;
-
-        }
-        map.insert(Sigma, sigma_tot/sigma_count as f64);
-        map.insert(IOC, ioc_tot/ioc_count as f64);
-        map.insert(Consensus, consensus_tot/consensus_count as f64);
-
-
-
-        map
-        
+    fn get_role_computes(&self) -> HashMap<Role, f64> {
+        HashMap::from([
+            (Sigma, self.role_average(Sigma)),
+            (IOC, self.role_average(IOC)),
+            (Consensus, self.role_average(Consensus)),
+        ])
     }
 
     // sort sorted_by_scores
@@ -205,10 +173,32 @@ impl Scheduler {
 
             }
 
-        }
-            
+        } 
+        for i in &self.by_role[&Consensus]{
+            if *i== node_id{
+                self.by_role[&Consensus].clone();
 
+            }
+
+        } 
+        for i in &self.by_role[&IOC]{
+            if *i== node_id{
+                self.by_role[&IOC].clone();
+
+            }
+
+        } 
     }
+    fn check_overload(&mut self)-> Vec<NodeId>{
+        let mut overloaded_nodes: Vec<NodeId> = Vec::new();
+        for i in self.nodes.keys(){
+            if self.nodes[i].score>THRESHOLD{
+                overloaded_nodes.push(i);
+            }
+
+        }
+        overloaded_nodes
+}
 
     fn remove_node(&mut self, nodeId: NodeId){
         let ip_addr = self.nodes.get(nodeId).unwrap().ip;
@@ -216,14 +206,168 @@ impl Scheduler {
         self.by_ip.remove(&ip_addr);
 
         self.remove_from_by_role(nodeId);
+        self.rebuild_sorted_nodes();
 
     }
-    fn update_sorted_nodes(){
 
+    fn get_node_by_ip(&mut self, ip_addr: IpAddr)-> Option<NodeId>{
+    self.by_ip.get(&ip_addr).copied()
     }
-    fn update_node_map(){
 
+    fn get_sorted_unemployed_nodes(&mut self,)-> Vec<NodeId>{
+        let mut unemployed_nodes: Vec<NodeId> = Vec::new();
+        for &i in &self.sorted_by_score{
+            if self.nodes.get(i).unwrap().state == Idle{
+                unemployed_nodes.push(i);
+
+            }
+            else{
+
+            }            
+        }
+        unemployed_nodes
     }
+
+    fn role_average(&self, role: Role) -> f64 {
+        let nodes = match self.by_role.get(&role) {
+            Some(nodes) => nodes,
+            None => return 0.0,
+        };
+
+        if nodes.is_empty() {
+            return 0.0;
+        }
+
+        let total: f64 = nodes
+            .iter()
+            .filter_map(|id| self.nodes.get(*id))
+            .map(|node| node.score)
+            .sum();
+
+        total / nodes.len() as f64
+    }
+
+    fn get_lowest_node_for_role(&self, role: &Role, exclude_node: NodeId,) -> Option<NodeId> {
+        self.by_role
+            .get(&role)?
+            .iter()
+            .filter_map(|&id| {
+                if id == exclude_node {
+                    return None;
+                }
+
+                let node = self.nodes.get(id)?;
+                Some((id, node.score))
+            })
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(id, _)| id)
+    }
+
+    fn decide_need(&mut self, node_id: NodeId) {
+        let role_computes = self.get_role_computes();
+
+        let sigma_avg = role_computes[&Sigma];
+        let consensus_avg = role_computes[&Consensus];
+        let ioc_avg = role_computes[&IOC];
+
+        let overloaded_nodes = self.check_overload();
+
+        // 1. Deal with currently overloaded nodes first.
+        if !overloaded_nodes.is_empty() {
+            for overloaded_node in overloaded_nodes {
+                self.share_load(overloaded_node);
+            }
+
+            return;
+        }
+
+        // 2. No node is individually overloaded.
+        //    Check whether any role has a high average compute.
+        let role_to_allocate = if sigma_avg >= THRESHOLD {
+            Some(Sigma)
+        } else if ioc_avg >= THRESHOLD {
+            Some(IOC)
+        } else if consensus_avg >= THRESHOLD {
+            Some(Consensus)
+        } else {
+            None
+        };
+
+        match role_to_allocate {
+            Some(role) => {
+                self.alloc_role(node_id, vec![role]);
+            }
+
+            None => {
+                // No role currently needs another node.
+                if let Some(node) = self.nodes.get_mut(node_id) {
+                    node.state = Idle;
+                    node.roles.clear();
+                }
+            }
+        }
+    }
+
+
+    fn share_load(&mut self, overloaded_node: NodeId) {
+        let roles = match self.nodes.get(overloaded_node) {
+            Some(node) => node.roles.clone(),
+            None => return,
+        };
+
+        if roles.is_empty() {
+            return;
+        }
+
+        let role_computes = self.get_role_computes();
+
+        let overloaded_role = roles
+            .into_iter()
+            .max_by(|a, b| {
+                role_computes[a]
+                    .total_cmp(&role_computes[b])
+            });
+
+        let role = match overloaded_role {
+            Some(role) => role,
+            None => return,
+        };
+
+        // First preference: an unemployed node.
+        let unemployed_node = self
+            .get_sorted_unemployed_nodes()
+            .into_iter()
+            .next();
+
+        if let Some(node_id) = unemployed_node {
+            self.alloc_role(node_id, vec![role]);
+
+            return;
+        }
+
+        // No unemployed node exists.
+        // Find the lowest-compute node already serving this role.
+        if let Some(node_id) = self.get_lowest_node_for_role(&role, overloaded_node) {
+            // For now, this is where the actual workload redistribution will happen.
+            // e.g. reduce overloaded_node.score increase node_id.score
+            // Actual work redistribution can be implemented later.
+            println!(
+                "Share {:?} load between {:?} and {:?}",
+                role,
+                overloaded_node,
+                node_id
+            );
+        }
+    }
+
+        fn alloc_role(&mut self, node_id: NodeId, roles: Vec<Role>) {
+            self.change_role(node_id, &roles);
+
+            if let Some(node) = self.nodes.get_mut(node_id) {
+                node.state = State::Active;
+            }
+}
+
 
 }
 
@@ -291,6 +435,7 @@ fn realloc_roles(endpoint: &Node) -> Vec<Role> {
 
     vec![role]
 }
+
 
 fn get_node_roles(ip: IpAddr) -> Vec<Role> {
     let role_map = ROLE_MAP.lock().unwrap();
