@@ -26,63 +26,6 @@ enum State {
     Overloaded,
     Cooldown,
 }
-impl RoleComputeAverage {
-    fn add_role_compute(&mut self, role: Vec<Role>, compute: f64) {
-        for i in role{
-            match i {
-            Role::Sigma => {
-                self.sigma_total += compute;
-                self.sigma_count += 1;
-            }
-            Role::IOC => {
-                self.ioc_total += compute;
-                self.ioc_count += 1;
-            }
-            Role::Consensus => {
-                self.consensus_total += compute;
-                self.consensus_count += 1;
-            }
-        }
-        }
-    }
-
-    fn sigma_average(&self) -> f64 {
-        if self.sigma_count == 0 {
-            0.0
-        } else {
-            self.sigma_total / self.sigma_count as f64
-        }
-    }
-    fn consensus_average(&self) -> f64 {
-        if self.consensus_count == 0 {
-            0.0
-        } else {
-            self.consensus_total / self.consensus_count as f64
-        }
-    }
-    fn ioc_average(&self) -> f64 {
-        if self.ioc_count == 0 {
-            0.0
-        } else {
-            self.ioc_total / self.ioc_count as f64
-        }
-    }
-}
-
-#[derive(Eq, PartialEq, Default, Debug)]
-pub struct RoleMap{
-    map: HashMap<Role,Vec<IpAddr>>,
-}
-impl RoleMap {
-    fn add_role_ip(&mut self, role: Vec<Role>, ip: IpAddr) {
-        for i in role{
-            self.map.entry(i).or_insert_with(Vec::new).push(ip);
-            }
-        }
-
-
-}
-
 
 type NodeId = DefaultKey;
 
@@ -96,6 +39,11 @@ struct Node {
 
 impl Node{
 
+}
+
+struct Connection {
+    from: NodeId,
+    to: NodeId
 }
 
 struct Scheduler {
@@ -189,7 +137,7 @@ impl Scheduler {
 
         } 
     }
-    fn check_overload(&mut self)-> Vec<NodeId>{
+    fn check_overload(&self)-> Vec<NodeId>{
         let mut overloaded_nodes: Vec<NodeId> = Vec::new();
         for i in self.nodes.keys(){
             if self.nodes[i].score>THRESHOLD{
@@ -369,334 +317,115 @@ impl Scheduler {
 }
 
 
-}
+    fn simulate(&mut self, steps: usize) {
+        println!("=== Scheduler Simulation ===");
 
+        for step in 0..steps {
+            println!("\n--- Step {} ---", step + 1);
 
+            // Simulate workload changing on every active node.
+            let ids: Vec<NodeId> = self.nodes.keys().collect();
 
-////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+            for id in ids {
+                if let Some(node) = self.nodes.get_mut(id) {
+                    if node.state == State::Active {
+                        // Deterministic workload fluctuation.
+                        let change = match step % 5 {
+                            0 => 8.0,
+                            1 => -3.0,
+                            2 => 12.0,
+                            3 => -5.0,
+                            _ => 6.0,
+                        };
 
-fn make_nodes(){
+                        node.score = (node.score + change).max(0.0);
+                    }
+                }
+            }
 
-}
+            self.rebuild_sorted_nodes();
 
+            // React to the new workload.
+            let ids: Vec<NodeId> = self.nodes.keys().collect();
 
+            for id in ids {
+                self.decide_need(id);
+            }
 
-//Check whether a node is Employed: In RoleMap
-fn is_employed(ip: IpAddr) -> bool {
-    let role_map = ROLE_MAP.lock().unwrap();
+            self.rebuild_sorted_nodes();
 
-    role_map
-        .map
-        .values()
-        .any(|ips| ips.contains(&ip))
-}
-
-//determine and allocate the roles to the given endpoint 
-fn realloc_roles(endpoint: &Node) -> Vec<Role> {
-    let mut nodes_map = NODES_COMPUTE_MAP.write().unwrap();
-    if let Some(node) = nodes_map.get_mut(&endpoint.ip_addr) {
-        node.state = State::Active;
-    }
-    let avg = ROLE_COMPUTE.lock().unwrap();
-
-    let sigma_avg = avg.sigma_average();
-    let consensus_avg = avg.consensus_average();
-    let ioc_avg = avg.ioc_average();
-
-    let max = sigma_avg.max(consensus_avg).max(ioc_avg);
-
-    let role = if max <= 70.0 {
-        // Everything is below the threshold.
-        // Default to Sigma.
-        Role::Sigma
-    } else if sigma_avg >= consensus_avg && sigma_avg >= ioc_avg {
-        // Sigma is the highest.
-        Role::Sigma
-    } else if consensus_avg >= ioc_avg {
-        // Consensus is the highest.
-        Role::Consensus
-    } else {
-        // IOC is the highest.
-        Role::IOC
-    };
-    
-
-    drop(avg);
-
-    ROLE_COMPUTE
-        .lock()
-        .unwrap()
-        .add_role_compute(vec![role.clone()], endpoint.score);
-
-    ROLE_MAP
-        .lock()
-        .unwrap()
-        .add_role_ip(vec![role.clone()], endpoint.ip_addr);
-
-    vec![role]
-}
-
-
-fn get_node_roles(ip: IpAddr) -> Vec<Role> {
-    let role_map = ROLE_MAP.lock().unwrap();
-
-    role_map
-        .map
-        .iter()
-        .filter(|(_, ips)| ips.contains(&ip))
-        .map(|(role, _)| role.clone())
-        .collect()
-}
-
-fn get_node_state(ip: IpAddr)-> State{
-    let role_map = NODES_COMPUTE_MAP.read().unwrap();
-
-    return role_map[&ip].state.clone();
-}
-
-//give it a better name please
-fn check_overload(){
-    let sorted_nodes_map: std::sync::RwLockReadGuard<'_, Vec<(IpAddr, NodeCompute)>> = SORTED_NODES_COMPUTE_MAP.read().unwrap();
-    for i in (0..sorted_nodes_map.len()).rev(){
-        if sorted_nodes_map[i].1.score>= THRESHOLD && get_node_state(sorted_nodes_map[i].0)==State::Active{
-            let roles = get_node_roles(sorted_nodes_map[i].0);
-            let overloaded_ip = sorted_nodes_map[i].0;
-            share_load(overloaded_ip, roles);
-        }
-        else if sorted_nodes_map[i].1.score<= THRESHOLD{
-            return 
+            self.print_status();
         }
     }
 
+    fn print_status(&self) {
+        println!("Nodes:");
 
-}
-
-
-//FIND OUT A NODE THAT IS IDLE WITH LOW COMPUT - IF NOT THEN AN ACTIVE NODE WITH THE LOWEST COMPUT AND SHARE IT WITH THE OVERLOADED NODE
-fn share_load(overloaded_ip:IpAddr, roles: Vec<Role>){
-    //get unemployed nodes
-    //check if unemployed nodes exist
-    //if not then use the active nodes within our network with the lowest computes - from sorted_nodes_compute
-    //make a remove_roles function, and add the role(s) to the unemployed or low compute guy else
-
-}
-
-fn alloc_role(endpoint: &Node) -> Vec<Role> {
-    if NODES_COMPUTE_MAP.read().unwrap().len() <= 2 {
-        let mut nodes_map = NODES_COMPUTE_MAP.write().unwrap();
-
-        if let Some(node) = nodes_map.get_mut(&endpoint.ip_addr) {
-            node.state = State::Active;
-        }
-        let roles = vec![Role::Sigma, Role::IOC, Role::Consensus];
-
-        ROLE_COMPUTE
-            .lock()
-            .unwrap()
-            .add_role_compute(roles.clone(), endpoint.score);
-
-        ROLE_MAP
-            .lock()
-            .unwrap()
-            .add_role_ip(roles.clone(), endpoint.ip_addr);
-
-
-        roles
-    } else {
-        realloc_roles(endpoint)
-    }
-}
-
-// decide if you need to allocate role currently or if you should just send the node an unemployed section
-fn decide_need(mut node: Node) {
-    let has_roles = {
-        let avg = ROLE_COMPUTE.lock().unwrap();
-
-        avg.sigma_count > 0
-            || avg.ioc_count > 0
-            || avg.consensus_count > 0
-    };
-
-    if !has_roles {
-        alloc_role(&node);
-        return;
-    }
-
-    let (sigma_avg, consensus_avg, ioc_avg) = {
-        let avg = ROLE_COMPUTE.lock().unwrap();
-
-        (
-            avg.sigma_average(),
-            avg.consensus_average(),
-            avg.ioc_average(),
-        )
-    };
-
-    let employed_nodes = {
-    let role_map = ROLE_MAP.lock().unwrap();
-
-        role_map
-            .map
-            .values()
-            .flat_map(|ips| ips.iter())
-            .collect::<std::collections::HashSet<_>>()
-            .len()
-    };
-
-    let nodes = NODES_COMPUTE_MAP.read().unwrap();
-    if sigma_avg <= 70.0
-        && ioc_avg < 70.0
-        && consensus_avg < 70.0
-        && employed_nodes > 3 
-        && nodes.get(&node.ip_addr).unwrap().state==State::Idle
-    {
-        drop(nodes);
-        add_to_backup(node);
-    } 
-    else if nodes.get(&node.ip_addr).unwrap().state==State::Active{
-        drop(nodes);
-        realloc_roles(&node);
-        
-    }
-    else {
-        drop(nodes);
-        alloc_role(&node);
-    }
-}
-
-
-fn add_to_backup(node: Node) {
-    {let mut backup_list = UNEMPLOYED_NODES_SORTED_MAP.write().unwrap();
-
-    backup_list.insert(
-            node.ip_addr
-            );}
-}
-
-fn remove_from_backup(node: Node){
-    {let mut backup_list = UNEMPLOYED_NODES_SORTED_MAP.write().unwrap();
-
-    backup_list.remove(
-            &node.ip_addr
-            );}
-
-}
-fn update_nodes(node: Node) {
-    let mut nodes = NODES_COMPUTE_MAP.write().unwrap();
-
-    let current_state = nodes
-        .get(&node.ip_addr)
-        .map(|node| node.state.clone())
-        .unwrap_or(State::Idle);
-
-    nodes.insert(
-        node.ip_addr,
-        NodeCompute {
-            score: node.score,
-            state: current_state,
-        },
-    );
-
-    drop(nodes);
-
-    update_sorted_nodes();
-}
-fn update_sorted_nodes() {
-    // Read the hashmap
-    let map = NODES_COMPUTE_MAP.read().unwrap();
-
-    // Copy into a vector
-    let mut sorted: Vec<(IpAddr, NodeCompute)> = map
-        .iter()
-        .map(|(ip, compute)| (*ip, compute.clone()))
-        .collect();
-
-    // Sort ascending by score
-    sorted.sort_by(|a, b| a.1.score.total_cmp(&b.1.score));
-
-    // Replace the old vector
-    *SORTED_NODES_COMPUTE_MAP.write().unwrap() = sorted;
-}
-
-//ping the determined result to the endpoint 
-fn send_decision(endpoint: Node){
-    let roles = alloc_role(&endpoint);
-    let decision = EmployedNode{
-        host_ip_addr:endpoint.ip_addr,
-        roles: roles,
-        score: endpoint.score,
-
-    };
-    println!("{:?} \n {:?}\n\n", ROLE_COMPUTE.lock().unwrap(), ROLE_MAP.lock().unwrap());
-}
-
-fn simulate_nodes(count: usize) {
-    let mut rng = rng();
-
-    for i in 1..=count {
-        let node = Node {
-            ip_addr: IpAddr::V4(Ipv4Addr::new(
-                10,
-                0,
-                0,
-                i as u8,
-            )),
-            score: rng.random_range(0.0..100.0),
-        };
-
-        // Update the node database
-        update_nodes(node.clone());
-
-        // Decide whether to employ or keep as backup
-        decide_need(node);
-    }
-
-    print_all();
-}
-
-fn simulate_updates(rounds: usize) {
-    let mut rng = rng();
-
-    for _ in 0..rounds {
-        let ips: Vec<IpAddr> = {
-            let map = NODES_COMPUTE_MAP.read().unwrap();
-            map.keys().copied().collect()
-        };
-
-        for ip in ips {
-            let node = Node {
-                ip_addr: ip,
-                score: rng.random_range(0.0..100.0),
-            };
-
-            update_nodes(node.clone());
-            decide_need(node);
+        for id in &self.sorted_by_score {
+            if let Some(node) = self.nodes.get(*id) {
+                println!(
+                    "  {:?}: score={:.1}, state={:?}, roles={:?}",
+                    id,
+                    node.score,
+                    node.state,
+                    node.roles
+                );
+            }
         }
 
-        update_sorted_nodes();
+        println!("\nRole averages:");
+
+        for (role, average) in self.get_role_computes() {
+            println!("  {:?}: {:.2}", role, average);
+        }
+
+        let overloaded = self.check_overload();
+
+        println!(
+            "\nOverloaded nodes: {}",
+            overloaded.len()
+        );
     }
 
-    print_all();
 }
 
-fn print_all() {
-    println!("\n================ NODES_COMPUTE_MAP ================");
-    println!("{:#?}", *NODES_COMPUTE_MAP.read().unwrap());
+fn main() {
+    let mut scheduler = Scheduler {
+        nodes: SlotMap::with_key(),
+        by_ip: HashMap::new(),
+        by_role: HashMap::new(),
+        sorted_by_score: Vec::new(),
+    };
 
-    println!("\n============ SORTED_NODES_COMPUTE_MAP =============");
-    println!("{:#?}", *SORTED_NODES_COMPUTE_MAP.read().unwrap());
+    scheduler.add_node(Node {
+        ip: "10.0.0.1".parse().unwrap(),
+        score: 70.0,
+        state: State::Idle,
+        roles: vec![],
+    });
 
-    println!("\n========== UNEMPLOYED_NODES_SORTED_MAP ============");
-    println!("{:#?}", *UNEMPLOYED_NODES_SORTED_MAP.read().unwrap());
+    scheduler.add_node(Node {
+        ip: "10.0.0.2".parse().unwrap(),
+        score: 80.0,
+        state: State::Idle,
+        roles: vec![],
+    });
 
-    println!("\n================ ROLE_COMPUTE =====================");
-    println!("{:#?}", *ROLE_COMPUTE.lock().unwrap());
+    scheduler.add_node(Node {
+        ip: "10.0.0.3".parse().unwrap(),
+        score: 95.0,
+        state: State::Idle,
+        roles: vec![],
+    });
 
-    println!("\n=================== ROLE_MAP ======================");
-    println!("{:#?}", *ROLE_MAP.lock().unwrap());
+    scheduler.add_node(Node {
+        ip: "10.0.0.4".parse().unwrap(),
+        score: 40.0,
+        state: State::Idle,
+        roles: vec![],
+    });
+
+    scheduler.simulate(20);
 }
 
-fn main(){
-    simulate_nodes(15);
-    simulate_updates(20);
-}
+
