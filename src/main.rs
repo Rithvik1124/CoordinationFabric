@@ -1,135 +1,28 @@
 use std::fs;
-use std::{thread, time};
+use std::io;
 
-use reqwest::blocking::Client;
-use serde::Serialize;
-
-
-
-
-pub struct CPUMetrics{
-    pub user: u64,
-    pub nice: u64,
-    pub system: u64,
-    pub idle: u64,
-    pub iowait: u64,
-    pub irq:u64,
-    pub softirq: u64,
-    pub steal: u64
-
+fn read_proc_stat() -> io::Result<String> {
+    let path = "/proc/stat";
+    let stat = fs::read_to_string(&path)?;
+    // Arguments are null-separated; convert to spaces
+    Ok(stat.replace('\0', " "))
 }
 
-#[derive(Serialize)]
-struct CpuPayload {
-    avg_score:f64,
-    cpu_usage: f64,
-    mem_usage: f64,
+fn read_proc_meminfo() -> io::Result<String> {
+    let path = "/proc/meminfo";
+    let meminfo = fs::read_to_string(&path)?;
+    // Arguments are null-separated; convert to spaces
+    Ok(meminfo.replace('\0', " "))
 }
 
-// ["MemTotal:", "12005580", "kB", "MemFree:", "1004288", "kB", "MemAvailable:", "6852260", "kB"]
-fn get_memused()-> f64{
-    let before_30_read =  fs::read("/proc/meminfo").unwrap();
-    let y = String::from_utf8_lossy(&before_30_read).into_owned();
-    let mem_values:Vec<&str> = y.split_whitespace().collect();
-    let mem_available = mem_values[7].parse::<f64>().unwrap();
-    let mem_total = mem_values[1].parse::<f64>().unwrap();
-    let mem_used:f64 = (1.0 -(mem_available/mem_total))*100.0;
-
-    mem_used
-}
-
-// fn get_netio()-> f64{
+fn main() -> io::Result<()> {
+    let pid = std::process::id();
     
-// }
-
-fn get_cpuusage()-> f64{
-    //Delta 1
-        let before_30_read =  fs::read("/proc/stat").unwrap();
-        let y = String::from_utf8_lossy(&before_30_read).into_owned();
-        let cpu_values_1:Vec<&str> = y.split_whitespace().collect();
-
-        let cpu1 = CPUMetrics{
-            user:cpu_values_1[1].parse().unwrap(),
-            nice:cpu_values_1[2].parse().unwrap(),
-            system:cpu_values_1[3].parse().unwrap(),
-            idle:cpu_values_1[4].parse().unwrap(),
-            iowait:cpu_values_1[5].parse().unwrap(),
-            irq:cpu_values_1[6].parse().unwrap(),
-            softirq:cpu_values_1[7].parse().unwrap(),
-            steal:cpu_values_1[8].parse().unwrap(),
-        };
-
-        let ten_millis = time::Duration::from_millis(30000);
-        thread::sleep(ten_millis);
+    // Read command line
+    let stat = read_proc_stat()?;
+    println!("Process stat: {}", stat);
+    let meminfo = read_proc_meminfo()?;
+    println!("Process meminfo: {}", meminfo);
         
-        let after_30_read =  fs::read("/proc/stat").unwrap();
-        let y = String::from_utf8_lossy(&after_30_read).into_owned();
-        let cpu_values_2:Vec<&str> = y.split_whitespace().collect();
-        let cpu2 = CPUMetrics{
-            user:cpu_values_2[1].parse().unwrap(),
-            nice:cpu_values_2[2].parse().unwrap(),
-            system:cpu_values_2[3].parse().unwrap(),
-            idle:cpu_values_2[4].parse().unwrap(),
-            iowait:cpu_values_2[5].parse().unwrap(),
-            irq:cpu_values_2[6].parse().unwrap(),
-            softirq:cpu_values_2[7].parse().unwrap(),
-            steal:cpu_values_2[8].parse().unwrap(),
-        };
-
-        let total_jiffies = (cpu2.user-cpu1.user)+
-                         (cpu2.nice-cpu1.nice)+
-                         (cpu2.system-cpu1.system)+
-                         (cpu2.idle-cpu1.idle)+
-                         (cpu2.iowait-cpu1.iowait)+
-                         (cpu2.irq-cpu1.irq)+
-                         (cpu2.softirq-cpu1.softirq)+
-                         (cpu2.steal-cpu1.steal)        ;
-        let busy_jiffies = total_jiffies-(cpu2.idle-cpu1.idle);
-        let curr_compute: f64 = (busy_jiffies as f64/total_jiffies as f64)*100.0;
-        //println!("total_jiffies:{} busy_jiffies:{} curr_compute: {}",total_jiffies, busy_jiffies,curr_compute);      
-        curr_compute
-    
+    Ok(())
 }
-
-fn main() {
-    println!("Started!");
-    
-   
-    let client = Client::new();
-
-    let server_url = "http://127.0.0.1:8080/cpu";
-    
-    loop{
-        let cpu=get_cpuusage();
-        let mem = get_memused();
-        let avg_score = (cpu+mem)/2.0;
-        let payload = CpuPayload {
-            avg_score: avg_score,
-            cpu_usage: cpu,
-            mem_usage: mem
-        };
-
-        match client.post(server_url).json(&payload).send() {
-            Ok(resp) => println!("Sent ({})", resp.status()),
-            Err(e) => println!("Failed to send: {}", e),
-        }
-
-
-
-    }
-   
-
-
-    
-}
-
-
-/*
-score = (0.4 * cpu * cpu) + (0.4 * mem * mem) + (0.1 * disk * disk) + (0.1 * net * net)
-where:
-cpu  = cpu_usage / 100.0
-mem  = 1.0 - (MemAvailable / MemTotal)
-disk = disk_util / 100.0
-net  = max(rx_util, tx_util) / 100.0
-}
-*/

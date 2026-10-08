@@ -1,0 +1,5 @@
+- Make a listener for node metrics score
+- Reorganize stuff into scheduler
+- make an agent to calculate score and send it to server after every n minutes
+- set this agent in the edr_telemetry_agent
+- add a process latency metric in the agent
