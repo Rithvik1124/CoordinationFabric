@@ -1,0 +1,30 @@
+{
+  "generated_at_unix_secs": 1792003058,
+  "scoring": "capacity = 0.50*(100-CPU%) + 0.35*(100-memory%) + 0.15*latency_score; latency_score falls linearly to 0 at 250ms",
+  "stale_after_secs": 60,
+  "nodes": [
+    {
+      "node_id": "fedora",
+      "source_ip": "127.0.0.1",
+      "advertise_url": "http://127.0.0.1:3000",
+      "cpu_usage": 9.343434343434344,
+      "mem_usage": 83.25686338728265,
+      "process_latency_ms": 0.0,
+      "capacity_score": 64.06692467627224,
+      "roles": [
+        "yara",
+        "sigma",
+        "ioc",
+        "consensus"
+      ],
+      "last_seen_unix_secs": 1792003058,
+      "age_secs": 0
+    }
+  ],
+  "role_owners": {
+    "consensus": "fedora",
+    "ioc": "fedora",
+    "sigma": "fedora",
+    "yara": "fedora"
+  }
+}

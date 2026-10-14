@@ -1,0 +1,28 @@
+{
+  "node_id": "fedora",
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 3000
+  },
+  "roles": {
+    "ioc": true,
+    "yara": true,
+    "sigma": true,
+    "consensus": true,
+    "server": false,
+    "file_hash": false
+  },
+  "peers": {
+    "ioc": "http://127.0.0.1:3000",
+    "yara": "http://127.0.0.1:3000",
+    "sigma": "http://127.0.0.1:3000",
+    "consensus": "http://127.0.0.1:3000",
+    "server": "http://127.0.0.1:3000",
+    "file_hash": "http://127.0.0.1:3000"
+  },
+  "expected_detectors": [
+    "ioc",
+    "yara",
+    "sigma"
+  ]
+}
